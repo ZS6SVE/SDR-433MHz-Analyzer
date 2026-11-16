@@ -34,6 +34,7 @@ This project is licensed under the **GNU General Public License, version 2 or (a
 
 It is GPL because it contains data derived from rtl_433, which uses that licence. The same terms cover the combined single-file page, and if you redistribute it you must keep the source available under the same licence.
 
+Copyright (C) 2026 ZS6SVE
 ### Third-party material
 
 - **rtl_433** (https://github.com/merbanan/rtl_433), GPL-2.0-or-later. The device fingerprint database (`build/devices.json`) is generated from its source files (names, pulse timings, modulation, bit lengths). Credit and thanks to the rtl_433 authors and contributors. The commit used is recorded in the database's metadata.
