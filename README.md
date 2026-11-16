@@ -19,6 +19,10 @@ Everything runs locally in your browser through WebUSB. Nothing is uploaded, no 
 2. Open `433-listener.html` in Chrome or Edge, from a file or localhost.
 3. Press Connect and pick the dongle.
 
+Screenshot:
+<img width="1896" height="933" alt="image" src="https://github.com/user-attachments/assets/3d79544e-c2e8-44b0-b2a9-2a4c09987e6b" />
+
+
 ## Building from source
 
 ```
