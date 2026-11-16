@@ -1,0 +1,10 @@
+const fs = require('fs');
+const dsp = fs.readFileSync('src/part1_detect.js', 'utf8') + fs.readFileSync('src/part2_decoders.js', 'utf8') + fs.readFileSync('src/part3_analyze.js', 'utf8');
+fs.writeFileSync('src/dsp.js', dsp);
+let html = fs.readFileSync('src/page.html', 'utf8');
+const rtl = fs.readFileSync('build/rtl.js', 'utf8'), wk = fs.readFileSync('src/worker.js', 'utf8');
+if (/<\/script/i.test(rtl + dsp + wk + fs.readFileSync('build/devices.json', 'utf8'))) throw new Error('script close tag in bundle');
+const db = fs.readFileSync('build/devices.json', 'utf8');
+html = html.replace('/*DSP*/', () => dsp + '\nself.RTL433_DB = ' + db + ';\n').replace('/*WORKER*/', () => wk).replace('/*RTL*/', () => rtl).replace('/*ANALYZER*/', () => fs.readFileSync('src/anacore.js', 'utf8') + fs.readFileSync('src/analyzer.js', 'utf8') + fs.readFileSync('src/aiprompt.js', 'utf8'));
+fs.writeFileSync('433-listener.html', html);
+console.log('ok', html.length);

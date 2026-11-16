@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>433 Listener</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232d; --line: #2a3340;
+    --text: #e6edf3; --dim: #8b98a8; --accent: #f0a32b; --ok: #3fb950; --bad: #f85149; --blue: #58a6ff; --violet: #c6b5ff;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .02em; display: flex; align-items: center; gap: 8px; }
+  h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); }
+  h1 .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-left: auto; }
+  label { display: flex; flex-direction: column; font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; gap: 3px; }
+  input, select { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; }
+  input[type=number] { width: 100px; }
+  input[type=range] { padding: 0; width: 110px; accent-color: var(--accent); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--dim); }
+  button.primary { background: var(--accent); color: #1a1205; border-color: var(--accent); font-weight: 600; }
+  button.primary.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button.mini { padding: 1px 7px; font-size: 11px; border-radius: 4px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 440px; gap: 16px; padding: 16px 20px; }
+  @media (max-width: 1050px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+  section h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  section h2 button { padding: 3px 9px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+  .stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  #status { padding: 9px 12px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+  #status.err { color: #ffd2cf; border-color: var(--bad); background: #2a1515; }
+  .meters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .meter { background: var(--panel2); border-radius: 8px; padding: 8px 10px; }
+  .meter b { display: block; font: 600 16px var(--mono); white-space: nowrap; }
+  .meter span { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  canvas { width: 100%; display: block; background: var(--panel2); border-radius: 8px; }
+  #wfWrap { position: relative; }
+  #wf { height: 260px; image-rendering: pixelated; border-radius: 8px 8px 0 0; background: #000; cursor: crosshair; }
+  #axis { position: relative; height: 22px; font: 11px var(--mono); color: var(--dim); background: var(--panel2); border-radius: 0 0 8px 8px; overflow: hidden; }
+  #axis span { position: absolute; top: 4px; transform: translateX(-50%); white-space: nowrap; }
+  #axis i { position: absolute; top: 0; width: 1px; height: 4px; background: var(--dim); }
+  #axis .listen { position: absolute; top: 0; height: 22px; width: 2px; background: var(--accent); opacity: .7; }
+  #wfCursor { position: absolute; top: 6px; right: 8px; font: 11px var(--mono); color: #fff; background: #000a; padding: 2px 6px; border-radius: 4px; pointer-events: none; }
+  #devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 12px; position: relative; transition: border-color .6s; }
+  .card.hid { opacity: .5; border-style: dashed; }
+  .card.fresh { border-color: var(--accent); }
+  .card .model { font-weight: 600; font-size: 13px; padding-right: 54px; }
+  .card .ident { font: 12px var(--mono); color: var(--dim); margin-top: 2px; word-break: break-all; }
+  .card .big { display: flex; gap: 16px; margin: 10px 0 6px; align-items: baseline; flex-wrap: wrap; }
+  .card .big div { font: 600 24px var(--mono); }
+  .card .big small { font-size: 13px; color: var(--dim); font-weight: 400; }
+  .card .kv { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--dim); }
+  .card .kv em { font-style: normal; color: var(--text); font-family: var(--mono); word-break: break-all; }
+  .card .sub { font-size: 11px; color: var(--dim); }
+  .card .acts { display: flex; gap: 6px; margin-top: 8px; }
+  .card .acts button:disabled { opacity: .4; cursor: not-allowed; }
+  .card .foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-top: 8px; }
+  .card svg { width: 100%; height: 34px; display: block; margin-top: 6px; }
+  .badge { position: absolute; top: 10px; right: 10px; font-size: 10px; padding: 2px 6px; border-radius: 4px; background: var(--line); color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
+  .tag { font-size: 10px; padding: 1px 5px; border-radius: 4px; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+  .sim { background: #2d2350; color: var(--violet); }
+  .unk { background: #3a2d12; color: var(--accent); }
+  .fsk { background: #10314a; color: var(--blue); }
+  .on { color: var(--ok) !important; } .off { color: var(--dim) !important; } .low { color: var(--bad) !important; }
+  .empty { color: var(--dim); padding: 30px 10px; text-align: center; font-size: 13px; }
+  #log { max-height: 640px; overflow: auto; font-size: 12px; }
+  .row { border-bottom: 1px solid var(--line); padding: 7px 2px; }
+  .row .top { display: flex; gap: 7px; align-items: baseline; flex-wrap: wrap; }
+  .row .num { font-family: var(--mono); color: var(--dim); font-size: 11px; }
+  .row time { font-family: var(--mono); color: var(--dim); font-size: 11px; }
+  .row .m { font-weight: 600; }
+  .row .f { font-family: var(--mono); color: var(--blue); font-size: 11px; }
+  .row .d { font-family: var(--mono); color: var(--dim); word-break: break-all; margin-top: 2px; }
+  .row .d b { color: var(--text); font-weight: 400; }
+  .row.unknown .m { color: var(--accent); }
+  .help { font-size: 13px; color: var(--dim); }
+  .help ol, .help ul { padding-left: 18px; margin: 6px 0; }
+  .help li { margin: 3px 0; }
+  .help code { font-family: var(--mono); color: var(--text); background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+  .chk { flex-direction: row; align-items: center; gap: 6px; text-transform: none; font-size: 12px; letter-spacing: 0; }
+  .cands { margin-top: 5px; font-family: system-ui, sans-serif; font-size: 12px; }
+  .cands .ch { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+  .cands div { margin-top: 2px; }
+  .cands .pct { display: inline-block; min-width: 34px; font-family: var(--mono); color: var(--ok); }
+  .cands a { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--dim); }
+  .cands a:hover { color: var(--blue); }
+  .cands .why { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+  .card .cands { margin-top: 8px; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 11px; color: var(--dim); margin: -2px 0 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .lg { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .lg.regular { background: var(--ok); } .lg.overdue { background: var(--accent); } .lg.irregular { background: var(--blue); } .lg.new { background: var(--line); }
+  .card { border-left-width: 4px; }
+  .card.c-regular { border-left-color: var(--ok); }
+  .card.c-overdue { border-left-color: var(--accent); }
+  .card.c-irregular { border-left-color: var(--blue); }
+  .card .reg { font-size: 12px; margin-top: 8px; font-family: var(--mono); }
+  .card .reg.regular { color: var(--ok); } .card .reg.overdue { color: var(--accent); } .card .reg.irregular { color: var(--blue); } .card .reg.new { color: var(--dim); }
+  .card .tl { width: 100%; height: 16px; display: block; margin-top: 6px; }
+  .histRow { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+  .histRow select { padding: 3px 6px; font-size: 12px; }
+  .row { cursor: pointer; }
+  .row:hover { background: #ffffff08; }
+  .card { cursor: pointer; }
+  .cands .more { color: var(--dim); font-size: 11px; }
+  .cands .none { color: var(--dim); font-size: 11px; }
+  .cands .dim { opacity: .45; }
+  button.pausedBtn { background: #10314a; border-color: var(--blue); color: var(--blue); }
+  #modal { position: fixed; inset: 0; background: #000a; z-index: 20; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; }
+  #modal[hidden] { display: none; }
+  #modal .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; width: min(1000px, 100%); padding: 18px 20px 22px; }
+  #modal .mhead { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  #modal .mhead h3 { margin: 0; font-size: 18px; }
+  #modal .mhead .x { margin-left: auto; }
+  #modal .meta { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 4px; font: 12px var(--mono); color: var(--dim); }
+  #modal .meta b { color: var(--text); font-weight: 500; }
+  #modal h4 { margin: 18px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); }
+  #modal table { border-collapse: collapse; font-size: 13px; }
+  #modal td { padding: 3px 14px 3px 0; vertical-align: top; }
+  #modal td:first-child { color: var(--dim); }
+  #modal .trainWrap { overflow-x: auto; background: var(--panel2); border-radius: 8px; }
+  #modal .trainWrap canvas { width: auto; background: transparent; }
+  #modal .rowsTbl td { font-family: var(--mono); font-size: 12px; }
+  #modal .bin { color: var(--dim); word-break: break-all; font-size: 11px; }
+  #modal textarea { width: 100%; height: 90px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; font: 11px var(--mono); padding: 6px; }
+  #modal .actions { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  #trainInfo { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot" id="dot"></span>433 Listener</h1>
+  <div class="controls">
+    <label>Mode
+      <select id="mode">
+        <option value="bank">Sensitive (1 MHz, narrowband)</option>
+        <option value="classic">Classic (250 kHz, like rtl_433)</option>
+      </select>
+    </label>
+    <label>Frequency (MHz)
+      <input type="number" id="freq" step="0.001" value="433.920" list="freqs">
+      <datalist id="freqs"><option value="433.920"><option value="315.000"><option value="345.000"><option value="868.300"><option value="915.000"></datalist>
+    </label>
+    <label>Gain
+      <select id="gain">
+        <option value="auto">Auto</option><option>0</option><option>9</option><option>14</option><option>20</option><option>25</option>
+        <option>30</option><option>35</option><option>40</option><option>45</option><option>49.6</option>
+      </select>
+    </label>
+    <label>PPM <input type="number" id="ppm" value="0" step="1" style="width:64px"></label>
+    <label>Trigger <span id="snrv" style="text-transform:none">7 dB</span><input type="range" id="snr" min="4" max="18" step="0.5" value="7"></label>
+    <button id="pause" disabled title="Stop detecting without disconnecting (space bar)">Pause</button>
+    <button id="sim" title="Feed synthetic, deliberately weak signals through the decoder to try the page without a dongle">Simulate</button>
+    <button id="connect" class="primary">Connect dongle</button>
+  </div>
+</header>
+
+<main>
+  <div class="stack">
+    <div id="status">Not connected. Plug in your NESDR, close SDR++, then click <b>Connect dongle</b>.</div>
+    <section>
+      <h2><span>Waterfall <span id="coverage" style="text-transform:none;letter-spacing:0"></span></span>
+        <span><label class="chk"><input type="checkbox" id="showMarks" checked> markers</label></span></h2>
+      <div id="wfWrap"><canvas id="wf" width="1024" height="260"></canvas><div id="wfCursor" hidden></div></div>
+      <div id="axis"></div>
+      <div class="meters" style="margin-top:10px">
+        <div class="meter"><span>Noise floor</span><b id="mNoise">–</b></div>
+        <div class="meter"><span>Packets</span><b id="mCount">0</b></div>
+        <div class="meter"><span>Rejected as noise</span><b id="mRej">0</b></div>
+        <div class="meter" title="Samples per second actually arriving from the dongle, measured with the computer's clock. It should match the configured rate (1.024 MS/s Sensitive, 0.25 MS/s Classic). If it doesn't, timings and frequencies are wrong."><span>Dongle rate</span><b id="mRate">–</b></div>
+        <div class="meter"><span>DSP load</span><b id="mLoad">–</b></div>
+      </div>
+      <canvas id="train" height="90"></canvas>
+      <div id="trainInfo">The most recent pulse train will be drawn here.</div>
+    </section>
+    <section>
+      <h2>Devices <span style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="chk">only <select id="devFilter" style="max-width:260px;padding:3px 6px;font-size:12px"><option value="">all devices</option></select></label>
+        <label class="chk" title="Pause detection as soon as the selected device is heard"><input type="checkbox" id="pauseOnSeen"> pause when seen</label>
+ <label class="chk" id="hidWrap" style="display:none" title="Hidden devices are removed from the device list and the log. Tick to show them again."><input type="checkbox" id="showHid"> show hidden (<span id="hidCount">0</span>)</label>
+        <button id="anaBtn" title="Compare the devices ticked with “compare”, find shared bit sections, test checksums and build grouping rules">Analyze…</button>
+        <button id="clearDev">Clear</button></span></h2>
+      <div class="legend"><span><i class="lg regular"></i>regular</span><span><i class="lg overdue"></i>regular, now overdue</span><span><i class="lg irregular"></i>irregular / on demand</span><span><i class="lg new"></i>not enough data yet</span>
+        <label class="chk" style="margin-left:auto" title="Unknown signals are treated as the same device when these hex characters (and the bit length) match. Leave 'to' empty to compare the whole code.">unknown: same device if hex chars <input type="number" id="grpFrom" min="1" value="1" style="width:52px;padding:2px 4px">to <input type="number" id="grpTo" min="1" placeholder="end" style="width:58px;padding:2px 4px">match</label>
+        <label class="chk" title="Show an unknown signal as a device card after it has been heard this many times (1 = every unknown signal gets a card). Lower it if repeated signals are missing from this tab.">card after <input type="number" id="minSeen" min="1" value="2" style="width:48px;padding:2px 4px"> sightings</label>
+        <label class="chk">sort <select id="devSort" style="padding:2px 6px;font-size:12px"><option value="last">last heard</option><option value="regular">regular first</option><option value="count">most heard</option><option value="name">name</option></select></label></div>
+      <div id="devices"><div class="empty">No devices heard yet. Weather sensors usually transmit every 30–60 s; press a remote button to test.</div></div>
+    </section>
+  </div>
+  <div class="stack">
+    <section>
+      <h2>Message log
+        <span>
+          <label class="chk" title="Only show possible devices that match at least this well">match ≥ <input type="number" id="minMatch" min="30" max="100" step="5" value="75" style="width:58px;padding:2px 4px">%</label>
+          <label class="chk"><input type="checkbox" id="showUnk" checked> unknown</label>
+          <button id="export">Export JSON</button> <button id="clearLog">Clear</button>
+        </span>
+      </h2>
+      <div id="log"><div class="empty">Nothing yet.</div></div>
+    </section>
+    <section>
+      <h2>History <span><button id="clearHist">Clear history</button></span></h2>
+      <div class="histRow">
+        <label class="chk">keep <select id="keepH"><option value="1">1 hour</option><option value="4">4 hours</option><option value="12">12 hours</option><option value="24">24 hours</option><option value="72">3 days</option><option value="168">7 days</option></select></label>
+        <label class="chk">max on disk <select id="maxMB"><option>25</option><option>50</option><option>100</option><option>250</option><option>500</option></select> MB</label>
+        <label class="chk"><input type="checkbox" id="persist" checked> save between sessions</label>
+      </div>
+      <div id="histInfo" class="help" style="margin-top:8px;font-size:12px"></div>
+    </section>
+    <section class="help">
+      <h2>How it works</h2>
+      <ul>
+        <li><b>Sensitive mode</b> tunes 1 MHz of spectrum and splits it into narrow channels, each with its own pulse detector, so a weak signal only competes with the noise in its own channel. Two channel sets run side by side: fine channels (32 kHz) for ordinary sensors and wider, faster channels (64 kHz) that keep very short pulses sharp. The page keeps whichever copy of a transmission decodes best. In tests it decodes signals about 8 dB weaker than Classic mode or rtl_433 can. Signals that switch between two tones are detected and tagged <span class="tag fsk">FSK</span>.</li>
+        <li>Signals that no decoder recognises are still turned into bits where the timing allows it (PWM, PPM, NRZ, Manchester) and logged as <span class="tag unk">unknown</span>. Repeated codes get their own device card. Packets whose timing looks random are discarded as noise.</li>
+        <li>Unknown signals are compared against a built-in <b>device database</b> extracted from rtl_433 (<span id="dbInfo"></span>). Possible devices are ranked by modulation, timing and message length, and each links to its rtl_433 decoder. A match means "consistent with", not proof.</li>
+        <li>The <b>IQ</b> button on a log entry saves the raw radio recording of that packet (.cu8). Open it in Universal Radio Hacker, or run <code>rtl_433 -A -r file.cu8</code>. You can also send it to Claude to get a decoder written for it.</li>
+        <li><b>Regularity</b>: each device's transmission times are tracked. Devices that send on a fixed interval (most weather sensors, every 30–90 s) get a green edge with the measured interval and the share of expected transmissions actually heard. They turn orange when one is overdue. Remotes and other on-demand devices are blue. The strip at the bottom of each card shows the last hour (newest on the right).</li>
+        <li><b>History</b> (packets, device timing) is kept for the time you choose and capped at the disk size you set; older data is deleted automatically. Raw IQ recordings are kept in memory only (newest ~50 MB) and are lost when the page closes. Simulated packets aren't saved.</li>
+        <li>If you see a lot of junk, raise the trigger. To catch weaker signals, lower it to about 6 dB. Below that, noise starts getting through.</li>
+      </ul>
+      <h2 style="margin-top:12px">Setup</h2>
+      <ol>
+        <li>Use <b>Chrome or Edge</b>. On Windows the dongle needs the WinUSB driver (installed with Zadig). If SDR++ works with it, it's already set up.</li>
+        <li><b>Close SDR++</b> first. Only one program can open the dongle at a time.</li>
+        <li>If <i>Connect</i> shows no device picker, serve the page from localhost: run <code>python -m http.server</code> in this file's folder and open <code>http://localhost:8000</code>.</li>
+        <li>For weak signals, extend the antenna to about 17 cm, use gain 40–49, and put the dongle on a USB extension cable away from the PC.</li>
+      </ol>
+    </section>
+  </div>
+</main>
+
+<div id="modal" hidden><div class="panel" id="mpanel"></div></div>
+
+<script id="dsp-src" type="text/plain">/*DSP*/
+/*WORKER*/</script>
+<script>/*RTL*/</script>
+<script>
+(() => {
+  'use strict';
+  const MODES = {
+    bank: { sr: 1024000, offset: 220000, block: 131072, inflight: 3, trig: 7 },
+    classic: { sr: 250000, offset: 0, block: 32768, inflight: 2, trig: 8 },
+  };
+  const $ = id => document.getElementById(id);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('l433.' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem('l433.' + k, JSON.stringify(v)); } catch {} },
+  };
+
+  const names = store.get('names', {});
+  const hidden = new Set(store.get('hidden', []));
+  let showHidden = false;
+  const saveHidden = () => store.set('hidden', [...hidden]);
+  function setHidden(keys, on) {
+    for (const k of keys) { if (on) hidden.add(k); else hidden.delete(k); }
+    saveHidden(); updHidCount(); renderDevices(); renderLog();
+  }
+  function updHidCount() {
+    const n = [...hidden].filter(k => devices.has(k)).length;
+    $('hidCount').textContent = n; $('hidWrap').style.display = n || showHidden ? '' : 'none';
+  }
+  const devName = key => names[key] || '';
+  function setDevName(key, v) {
+    v = (v || '').trim().slice(0, 40);
+    if (v) names[key] = v; else delete names[key];
+    store.set('names', names);
+    refreshFilterList(); renderLog(); renderDevices();
+  }
+  function renameDevice(key) {
+    const d = devices.get(key);
+    const v = prompt('Name for this device (leave empty to clear):', devName(key) || (d ? d.model : ''));
+    if (v !== null) setDevName(key, v);
+  }
+  function latestIq(key) { return log.find(x => x.key === key && x.iq && x.iq.length); }
+
+  $('mode').value = store.get('mode', 'bank');
+  $('freq').value = store.get('freq', '433.920');
+  $('gain').value = store.get('gain', '40');
+  $('ppm').value = store.get('ppm', 0);
+  const trigFor = mode => store.get('snr.' + mode, MODES[mode].trig);
+  $('snr').value = trigFor($('mode').value);
+  $('snrv').textContent = $('snr').value + ' dB';
+
+  let worker;
+  try {
+    worker = new Worker(URL.createObjectURL(new Blob([$('dsp-src').textContent], { type: 'text/javascript' })));
+  } catch (e) {
+    setStatus('This browser blocked the background worker the page needs: ' + escapeHtml(String(e)), true);
+  }
+
+  let dspMul = 1; // measured dongle rate / requested rate (normally 1)
+  let dev = null, running = false, pendingTune = false, simTimer = null, outstanding = 0, dropped = 0;
+  let paused = false, simActive = false, filterKey = '';
+  $('minMatch').value = store.get('minMatch', 75);
+  let pktSeq = 0, packetCount = 0;
+  const devices = new Map();
+  const log = [];
+/*ANALYZER*/
+
+  function cfgNow() {
+    const mode = $('mode').value, P = MODES[mode];
+    const listenHz = Math.round(+$('freq').value * 1e6);
+    return { mode, sr: Math.round(P.sr * dspMul), hwSr: P.sr, listenHz, centerHz: listenHz + P.offset, snrDb: +$('snr').value };
+  }
+  function sendConfig() {
+    const c = cfgNow();
+    worker.postMessage({ cmd: 'config', cfg: c });
+    const usable = c.mode === 'bank' ? 0.44 * c.sr : 0.5 * c.sr;
+    $('coverage').textContent = `· decoding ${((c.centerHz - usable) / 1e6).toFixed(3)}–${((c.centerHz + usable) / 1e6).toFixed(3)} MHz`;
+    wfReset(c);
+  }
+  function setStatus(html, err) { $('status').innerHTML = html; $('status').classList.toggle('err', !!err); }
+  const listening = () => { const c = cfgNow(); return `Listening around <b>${(c.listenHz / 1e6).toFixed(3)} MHz</b> in ${c.mode === 'bank' ? 'sensitive' : 'classic'} mode (${c.sr / 1000} kS/s).`; };
+
+  // ---- radio
+  async function connect() {
+    if (!('usb' in navigator)) {
+      setStatus('This browser has no WebUSB. Open the page in <b>Chrome</b> or <b>Edge</b> (from a file, localhost or https).', true);
+      return;
+    }
+    stopSim(); dspMul = 1;
+    try {
+      setStatus('Choose your RTL-SDR in the browser dialog (often listed as <i>RTL2838UHIDIR</i> or <i>NESDR</i>)…');
+      dev = await new RTLSDR.RTL2832U_Provider().get();
+      await applyTuning();
+      running = true;
+      $('connect').textContent = 'Disconnect'; $('connect').classList.add('stop'); $('dot').classList.add('on');
+      $('pause').disabled = false; setPaused(false);
+      setStatus(listening());
+      readLoop();
+    } catch (e) {
+      console.error(e);
+      dev = null;
+      const msg = String(e && (e.message || e));
+      let hint = '';
+      if (/No device was selected/i.test(msg)) hint = 'No device was picked. If the list was empty, check the driver (WinUSB via Zadig) and that the dongle is plugged in.';
+      else if (/access|claim|denied|busy|unable to/i.test(msg)) hint = 'The dongle is busy or blocked. Close SDR++ and any other SDR program, then unplug the dongle and plug it back in. On Windows it also needs the WinUSB driver.';
+      setStatus(`Couldn't open the dongle: <code>${escapeHtml(msg)}</code><br>${hint}`, true);
+    }
+  }
+  async function applyTuning() {
+    const c = cfgNow();
+    sendConfig();
+    const real = await dev.setSampleRate(c.hwSr); console.log('requested', c.hwSr, 'driver says', real);
+    await dev.setFrequencyCorrection(Math.round(+$('ppm').value) || 0);
+    await dev.setCenterFrequency(c.centerHz);
+    const g = $('gain').value;
+    await dev.setGain(g === 'auto' ? null : +g);
+    await dev.resetBuffer();
+  }
+  let rateT = 0, rateN = 0;
+  async function readLoop() {
+    rateT = 0;
+    let P = MODES[$('mode').value];
+    const pending = [];
+    const fill = () => { while (pending.length < P.inflight) pending.push(dev.readSamples(P.block)); };
+    try {
+      fill();
+      while (running) {
+        const blk = await pending.shift();
+        if (!running) break;
+        { // measure the real sample rate
+          const now = performance.now();
+          if (!rateT) { rateT = now; rateN = 0; }
+          rateN += blk.data.byteLength >> 1;
+          if (now - rateT >= 2000) {
+            const r = rateN / ((now - rateT) / 1000), want = P.sr * dspMul, bad = Math.abs(r / want - 1) > 0.08;
+            // the dongle really streams at a different rate than requested: believe the measurement so every timing,
+            // frequency and exported file label is correct
+            const q = r / want, snap = Math.abs(q - 2) < 0.2 ? 2 : Math.abs(q - 0.5) < 0.1 ? 0.5 : Math.abs(q - 4) < 0.4 ? 4 : 0;
+            if (bad && snap) {
+              dspMul *= snap; rateT = 0; sendConfig();
+              setStatus(listening() + ` <i>(dongle really streams ${(P.sr * dspMul / 1e6).toFixed(3)} MS/s, timings corrected)</i>`);
+              fill(); continue;
+            }
+            $('mRate').textContent = (r / 1e6).toFixed(3) + ' MS/s' + (bad ? ` ≠ ${(want / 1e6).toFixed(3)}` : '');
+            $('mRate').style.color = bad ? 'var(--bad, #f85149)' : '';
+            rateT = now; rateN = 0;
+          }
+        }
+        if (pendingTune) {
+          pendingTune = false;
+          await Promise.allSettled(pending); pending.length = 0;
+          await applyTuning();
+          rateT = 0;
+          P = MODES[$('mode').value];
+          setStatus(listening());
+          fill();
+          continue;
+        }
+        fill();
+        if (paused) continue; // keep the USB stream flowing, but don't process
+        if (outstanding > 6) { dropped++; continue; } // DSP can't keep up: skip a block
+        outstanding++;
+        worker.postMessage({ cmd: 'samples', buf: blk.data }, [blk.data]);
+      }
+    } catch (e) {
+      console.error(e);
+      if (running) setStatus(`Lost the dongle: <code>${escapeHtml(String(e.message || e))}</code>. Unplug it, plug it back in, then reconnect.`, true);
+      running = false;
+    }
+    await Promise.allSettled(pending);
+    try { await dev.close(); } catch {}
+    dev = null;
+    $('connect').textContent = 'Connect dongle'; $('connect').classList.remove('stop'); $('dot').classList.remove('on');
+    setPaused(false); if (!simActive) $('pause').disabled = true;
+  }
+  function disconnect() { running = false; setStatus('Disconnected.'); }
+
+  // ---- worker messages
+  worker && (worker.onmessage = e => {
+    const m = e.data;
+    if (m.type === 'stats') {
+      if (!m.sim) outstanding = Math.max(0, outstanding - 1);
+      $('mNoise').textContent = m.noiseDb.toFixed(1) + ' dBFS';
+      $('mLoad').textContent = Math.round(m.load * 100) + '%' + (dropped ? ` · ${dropped} dropped` : '');
+      $('mRej').textContent = m.rejected;
+    } else if (m.type === 'spec') {
+      wfRow(m);
+    } else if (m.type === 'pkt') {
+      onPacket(m);
+    } else if (m.type === 'dbinfo') {
+      $('dbInfo').textContent = `${m.n} device entries, rtl_433 ${m.commit}`;
+    }
+  });
+
+  // ---- packets → messages
+  function onPacket(p) {
+    if (paused) return; // packets already in flight when pause was pressed
+    const seq = ++pktSeq;
+    packetCount++;
+    $('mCount').textContent = packetCount;
+    const base = { seq, time: p.time, rssi: p.rssi, snr: p.snr, sim: p.sim, freqHz: p.freqHz, fskDevHz: p.fskDevHz, iq: p.iq, sr: p.sr, centerHz: p.centerHz, w: p.w, g: p.g, n: p.n, analysis: p.analysis, pktStartMs: p.pktStartMs, pktEndMs: p.pktEndMs, freqOffHz: p.freqOffHz };
+    const keys = p.msgs.length ? p.msgs.map(m => devKey({ ...m, sim: p.sim })) : [];
+    const markOk = !filterKey || keys.includes(filterKey) || (!p.msgs.length && (unkIdent(p.analysis, p.sim, p) || {}).key === filterKey);
+    if (markOk) drawTrain(p, seq);
+    if (p.msgs.length) {
+      if (markOk) wfMark(p, seq, '#3fb950');
+      for (const m of p.msgs) addMessage({ ...m, ...base, key: devKey({ ...m, sim: p.sim }) });
+    } else {
+      if (markOk) wfMark(p, seq, '#f0a32b');
+      const a = p.analysis;
+      const entry = { ...base, model: 'Unknown ' + a.modulation, unknown: true, analysis: a };
+      entry.key = '#' + seq; // replaced by the device key in unknownToDevice
+      addLog(entry);
+      unknownToDevice(entry);
+    }
+  }
+  // Unknown signals: identity = modulation + bit length + the chosen range of hex characters
+  function unkIdent(a, sim, entry) {
+    if (!a) return null;
+    const rule = entry && ruleFor(entry);
+    if (rule) return { model: rule.name, id: 'rule', key: devKey({ model: rule.name, id: 'rule', sim }), rule };
+    if (!a.best) {
+      // no clean bit row (weak / partial packet): identify by modulation, pulse count and timing
+      const t = a.timing; if (!t) return null;
+      const q = v => Math.max(1, Math.round(v / 25)) * 25;
+      const id = t.coding === 'NRZ' ? `NRZ ${q(t.unit)}µs` : `${t.coding} ${q(t.short)}/${q(t.long)}µs`;
+      const model = `Unknown ${a.modulation} · ${a.pulses} pulses (no bit row)`;
+      return { model, id, key: devKey({ model, id, sim }) };
+    }
+    const from = Math.max(1, +$('grpFrom').value || 1), toV = +$('grpTo').value || 0;
+    const hex = a.best.hex, part = hex.slice(from - 1, toV ? Math.max(toV, from) : undefined);
+    const id = (from > 1 ? '…' : '') + part + (toV && toV < hex.length ? '…' : '');
+    const model = `Unknown ${a.modulation} · ${a.best.len} bits`;
+    return { model, id, key: devKey({ model, id, sim }) };
+  }
+  // Packets within 2 s of each other belong to one transmission (bursts, or the same
+  // signal seen twice). d.times holds one timestamp per transmission.
+  function pushTx(d, t) {
+    const last = d.times[d.times.length - 1];
+    if (last !== undefined && t - last < 2000 && t >= last) return;
+    d.times.push(t); if (d.times.length > 20000) d.times.shift();
+  }
+  // A card is created once a packet repeats its bit row inside the packet (clean
+  // reception). After that, every packet with the same identity counts for it.
+  // ...or once the same identity has been heard N times (setting "card after N sightings"),
+  // which also catches weak packets whose bit row never repeats inside the packet.
+  const unkQualifies = a => a && a.best && a.best.count >= 2 && a.best.len >= 12;
+  const minSeen = () => Math.max(1, +$('minSeen').value || 2);
+  const unkSeen = new Map();
+  function unknownToDevice(entry, replay, qualified) {
+    const a = entry.analysis, u = unkIdent(a, entry.sim, entry);
+    if (!u) return;
+    entry.key = u.key;
+    let ok;
+    if (qualified) ok = qualified.has(u.key);
+    else {
+      const n = (unkSeen.get(u.key) || 0) + 1; unkSeen.set(u.key, n);
+      ok = devices.has(u.key) || !!u.rule || unkQualifies(a) || n >= minSeen();
+    }
+    if (ok) addDevice({ ...entry, model: u.model, id: u.id, candidates: a.candidates, data: { code: a.best ? a.best.hex : '—', timing: a.info } }, replay);
+  }
+  function qualifiedKeys(entries) {
+    const q = new Set(); unkSeen.clear();
+    for (const e of entries) if (e.unknown) {
+      const u = unkIdent(e.analysis, e.sim, e); if (!u) continue;
+      e.key = u.key; unkSeen.set(u.key, (unkSeen.get(u.key) || 0) + 1);
+      if (u.rule || unkQualifies(e.analysis)) q.add(u.key);
+    }
+    for (const [k, n] of unkSeen) if (n >= minSeen()) q.add(k);
+    return q;
+  }
+  // re-group everything after the grouping setting changes
+  function rebuildDevices() {
+    devices.clear();
+    const q = qualifiedKeys(log);
+    for (let i = log.length - 1; i >= 0; i--) { const e = log[i]; if (e.unknown) unknownToDevice(e, true, q); else addDevice(e, true); }
+    for (const d of devices.values()) d.inFilter = true;
+    if (filterKey && !devices.has(filterKey)) setFilter('');
+    refreshFilterList(); renderLog(); renderDevices();
+  }
+  function addMessage(m) {
+    const d = devices.get(devKey(m));
+    if (d && d.lastSig === JSON.stringify(m.data) && m.time - d.last < 2000) return; // repeat of the same transmission
+    addLog(m);
+    addDevice(m);
+  }
+  const devKey = m => `${m.model}|${m.id}|${m.channel ?? ''}${m.sim ? '|sim' : ''}`;
+  function addDevice(m, replay) {
+    const key = devKey(m);
+    let d = devices.get(key);
+    let created = false;
+    if (!d) { d = { key, model: m.model, id: m.id, channel: m.channel, count: 0, hist: [], times: [], unknown: !!m.unknown, sim: !!m.sim }; devices.set(key, d); created = true; }
+    const sig = JSON.stringify(m.data);
+    if (created && !replay) {
+      // packets tagged with this device before it qualified for a card
+      for (const e of log.filter(e => e.key === key && e.time < m.time).sort((a, b) => a.time - b.time)) pushTx(d, e.time);
+    }
+    if (m.candidates) d.candidates = m.candidates;
+    Object.assign(d, { last: m.time, data: m.data, lastSig: sig, snr: m.snr, freqHz: m.freqHz, fskDevHz: m.fskDevHz, fresh: replay ? 0 : Date.now() });
+    d.count++; d.lastSeq = m.seq;
+    pushTx(d, m.time);
+    if (m.data && typeof m.data.temperature_C === 'number') { d.hist.push(m.data.temperature_C); if (d.hist.length > 60) d.hist.shift(); }
+    if (replay) return;
+    if (!d.inFilter) { d.inFilter = true; refreshFilterList(); }
+    if (filterKey && key === filterKey && $('pauseOnSeen').checked && !paused) {
+      setPaused(true);
+      setStatus(`Paused: <b>${escapeHtml(d.model)}</b> (${escapeHtml(fmtId(d))}) was heard. Click its entry to inspect the packet, or press Resume.`);
+      setTimeout(() => openPacket(m.seq), 50);
+    }
+    updHidCount(); renderDevices();
+  }
+  const LOG_MEM = 5000, IQ_BUDGET = 50e6;
+  let iqBytes = 0;
+  function addLog(m) {
+    log.unshift(m);
+    if (log.length > LOG_MEM) { const old = log.pop(); if (old.iq) iqBytes -= old.iq.length; }
+    if (m.iq) {
+      iqBytes += m.iq.length;
+      for (let i = log.length - 1; i > 0 && iqBytes > IQ_BUDGET; i--) if (log[i].iq) { iqBytes -= log[i].iq.length; log[i].iq = null; }
+    }
+    Store.add(m);
+    renderLog();
+  }
+
+  // ---- rendering helpers
+  function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function ago(t) {
+    const s = Math.round((Date.now() - t) / 1000);
+    if (s < 5) return 'just now'; if (s < 60) return s + ' s ago';
+    const m = Math.floor(s / 60); if (m < 60) return m + ' min ago';
+    return Math.floor(m / 60) + ' h ' + (m % 60) + ' min ago';
+  }
+  const hhmmss = t => new Date(t).toLocaleTimeString([], { hour12: false });
+  const mhz = f => (f / 1e6).toFixed(3) + ' MHz';
+  function fmtId(d) {
+    if (typeof d.id === 'number') return `ID ${d.id} (0x${d.id.toString(16)})`;
+    if (d.id === 'rule') return 'grouped by rule';
+    return d.unknown ? `match ${d.id}` : `ID ${d.id}`;
+  }
+  const LABELS = { T_us: 'T (µs)' };
+  function srcUrl(src) {
+    const f = src.replace(/^rtl_433\//, '');
+    return 'https://github.com/merbanan/rtl_433/blob/master/' + (f.startsWith('conf/') ? f : 'src/devices/' + f);
+  }
+  const minMatch = () => (+$('minMatch').value || 75) / 100;
+  const candLine = x => `<span class="pct">${Math.round(x.score * 100)}%</span> <a href="${srcUrl(x.src)}" target="_blank" rel="noopener">${escapeHtml(x.name)}</a> <span class="why">${escapeHtml(x.why)}</span>`;
+  // compact form: only the best match above the threshold (the detail view lists them all)
+  function candHtml(c) {
+    if (!c) return '';
+    const th = minMatch(), ok = c.filter(x => x.score >= th);
+    if (!ok.length) return `<div class="cands"><span class="none">No rtl_433 device matches ≥ ${Math.round(th * 100)}%</span></div>`;
+    return `<div class="cands"><span class="ch">Possible device:</span><div>${candLine(ok[0])}${ok.length > 1 ? ` <span class="more">+${ok.length - 1} more</span>` : ''}</div></div>`;
+  }
+  function fmtDur(sec) {
+    if (sec < 90) return (sec < 10 ? sec.toFixed(1) : Math.round(sec)) + ' s';
+    if (sec < 5400) return Math.round(sec / 60) + ' min';
+    return (sec / 3600).toFixed(1) + ' h';
+  }
+  function median(a) { const s = [...a].sort((x, y) => x - y); return s.length ? s[s.length >> 1] : 0; }
+  // How regularly does a device transmit? Missed transmissions show up as gaps of
+  // 2x or 3x the interval, so each gap is divided by its nearest multiple (up to 3).
+  function devStats(d) {
+    const t = d.times, n = t.length, now = Date.now();
+    if (n < 4) return { cls: 'new', label: `${n}× heard · not enough data for an interval yet` };
+    const iv = []; for (let i = 1; i < n; i++) iv.push((t[i] - t[i - 1]) / 1000);
+    const sorted = [...iv].sort((a, b) => a - b);
+    let base = sorted[Math.floor(sorted.length * 0.3)];
+    for (let k = 0; k < 3; k++) {
+      const est = iv.map(x => [x, Math.round(x / base)]).filter(([, m]) => m >= 1 && m <= 3).map(([x, m]) => x / m);
+      if (!est.length) break;
+      base = median(est);
+    }
+    const fits = iv.filter(x => { const m = Math.round(x / base); return m >= 1 && m <= 3 && Math.abs(x / m - base) <= base * 0.12; });
+    const spanS = (t[n - 1] - t[0]) / 1000;
+    if (base >= 2 && fits.length / iv.length >= 0.75) {
+      const jit = median(fits.map(x => Math.abs(x / Math.round(x / base) - base)));
+      const heard = Math.min(1, n / (Math.round(spanS / base) + 1));
+      const since = (now - t[n - 1]) / 1000;
+      const overdue = since > base * 2.5 + 5;
+      return {
+        cls: overdue ? 'overdue' : 'regular', base,
+        label: `every ${fmtDur(base)}${jit >= 0.5 ? ' ±' + fmtDur(jit) : ''} · heard ${Math.round(heard * 100)}%` + (overdue ? ` · nothing for ${fmtDur(since)}` : ''),
+      };
+    }
+    return { cls: 'irregular', label: `irregular · median gap ${fmtDur(median(iv))} · ${(n / Math.max(spanS / 3600, 1 / 60)).toFixed(n > 30 ? 0 : 1)}/h` };
+  }
+  function timeline(d) {
+    const now = Date.now(), win = 3600e3;
+    const ticks = d.times.filter(t => t > now - win).map(t => ((t - (now - win)) / win * 100).toFixed(2));
+    if (!ticks.length) return '';
+    const col = { regular: 'var(--ok)', overdue: 'var(--accent)', irregular: 'var(--blue)', new: 'var(--dim)' }[d.st.cls];
+    return `<svg class="tl" viewBox="0 0 100 16" preserveAspectRatio="none"><rect x="0" y="7.5" width="100" height="1" fill="var(--line)"/>${ticks.map(x => `<rect x="${x}" y="2" width="0.35" height="12" fill="${col}"/>`).join('')}</svg>`;
+  }
+  function spark(hist) {
+    if (hist.length < 2) return '';
+    const lo = Math.min(...hist), hi = Math.max(...hist), span = Math.max(hi - lo, 0.5);
+    const pts = hist.map((v, i) => `${(i / (hist.length - 1) * 100).toFixed(1)},${(30 - (v - lo) / span * 26 - 2).toFixed(1)}`).join(' ');
+    return `<svg viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+  function renderDevices() {
+    updHidCount();
+    const order = { regular: 0, overdue: 1, irregular: 2, new: 3 };
+    const list = [...devices.values()].filter(d => (!filterKey || d.key === filterKey) && (showHidden || !hidden.has(d.key)));
+    for (const d of list) d.st = devStats(d);
+    const pkts = new Map(); for (const e of log) if (e.key) pkts.set(e.key, (pkts.get(e.key) || 0) + 1);
+    const sort = $('devSort').value;
+    list.sort(sort === 'regular' ? (a, b) => order[a.st.cls] - order[b.st.cls] || b.last - a.last
+      : sort === 'count' ? (a, b) => b.times.length - a.times.length
+      : sort === 'name' ? (a, b) => a.model.localeCompare(b.model) || String(a.id).localeCompare(String(b.id))
+      : (a, b) => b.last - a.last);
+    if (!list.length) { $('devices').innerHTML = '<div class="empty">No devices heard yet. Weather sensors usually transmit every 30–60 s; press a remote button to test.</div>'; return; }
+    $('devices').innerHTML = list.map(d => {
+      const x = d.data || {};
+      const big = [];
+      if (typeof x.temperature_C === 'number') big.push(`<div>${x.temperature_C.toFixed(1)}<small> °C</small></div>`);
+      if (typeof x.humidity === 'number') big.push(`<div>${x.humidity}<small> %</small></div>`);
+      if (x.state) big.push(`<div class="${x.state === 'ON' ? 'on' : 'off'}">${x.state}</div>`);
+      const kv = Object.entries(x).filter(([k]) => !['temperature_C', 'humidity', 'state'].includes(k)).map(([k, v]) =>
+        `<span>${escapeHtml(LABELS[k] || k.replace('_', ' '))} <em class="${k === 'battery' && v === 'LOW' ? 'low' : ''}">${escapeHtml(v)}</em></span>`);
+      if (d.channel !== undefined && !('unit' in x)) kv.unshift(`<span>channel <em>${d.channel}</em></span>`);
+      const badge = d.sim ? '<span class="badge sim">sim</span>' : d.id === 'rule' ? '<span class="badge unk">rule</span>' : d.unknown ? '<span class="badge unk">unknown</span>' : '';
+      return `<div class="card c-${d.st.cls} ${Date.now() - d.fresh < 3000 ? 'fresh' : ''} ${cmpSel.has(d.key) ? 'cmp' : ''} ${hidden.has(d.key) ? 'hid' : ''}" data-key="${escapeHtml(d.key)}">${badge}
+        <div class="model">${escapeHtml(devName(d.key) || d.model)}</div>
+        ${devName(d.key) ? `<div class="sub">${escapeHtml(d.model)}</div>` : ''}
+        <div class="ident">${escapeHtml(fmtId(d))} · ${mhz(d.freqHz)}${d.fskDevHz ? ` · FSK ±${Math.round(d.fskDevHz / 1000)} kHz` : ''}</div>
+        ${big.length ? `<div class="big">${big.join('')}</div>` : '<div style="height:8px"></div>'}
+        <div class="kv">${kv.join('')}</div>
+        ${d.unknown ? candHtml(d.candidates) : ''}
+        ${spark(d.hist)}
+        <div class="reg ${d.st.cls}">${d.st.label}</div>
+        ${timeline(d)}
+        <div class="acts"><button class="mini" data-card="hide" title="${hidden.has(d.key) ? 'Show this device again' : 'Hide this device from the list and the log'}">${hidden.has(d.key) ? 'Unhide' : 'Hide'}</button><button class="mini" data-card="name">${devName(d.key) ? 'Rename' : 'Name'}</button><button class="mini" data-card="ai" title="Make a prompt with this device's data to paste into an AI chat">AI prompt</button>${latestIq(d.key) ? '<button class="mini" data-card="iq" title="Download the most recent raw IQ recording of this device">Export IQ</button>' : '<button class="mini" disabled title="No raw IQ in memory for this device (older than the memory budget, or restored from history)">Export IQ</button>'}<label class="cmpChk" title="Select this device for the Analyze screen"><input type="checkbox" data-cmp ${cmpSel.has(d.key) ? 'checked' : ''}>compare</label></div>
+        <div class="foot"><span title="packets = log entries for this device; transmissions = packets less than 2 s apart counted once">${ago(d.last)} · ${pkts.get(d.key) || 0} packets · ${d.times.length} transmissions</span><span>${d.snr.toFixed(0)} dB SNR</span></div>
+      </div>`;
+    }).join('');
+  }
+  function renderLog() {
+    const show = $('showUnk').checked;
+    const items = log.filter(m => (show || !m.unknown) && (!filterKey || m.key === filterKey) && (showHidden || !hidden.has(m.key))).slice(0, 300);
+    if (!items.length) { $('log').innerHTML = '<div class="empty">Nothing yet.</div>'; return; }
+    $('log').innerHTML = items.map(m => {
+      let d;
+      if (m.unknown) {
+        const a = m.analysis;
+        d = `${a.pulses} pulses, ${a.rows} row(s). ${escapeHtml(a.info)}` +
+          (a.rowsHex.length ? '<br>' + a.rowsHex.slice(0, 8).map(r => `<b>${r.kind}{${r.len}}</b> ${r.hex}`).join('<br>') : '') +
+          candHtml(a.candidates);
+      } else {
+        d = `${escapeHtml(fmtId(m))}${m.channel !== undefined ? ' ch ' + m.channel : ''} · ` +
+          Object.entries(m.data).map(([k, v]) => `${k}=${escapeHtml(v)}`).join(' ');
+      }
+      const tags = (m.sim ? '<span class="tag sim">sim</span>' : '') + (m.fskDevHz ? `<span class="tag fsk">FSK ±${Math.round(m.fskDevHz / 1000)}k</span>` : '');
+      const iq = m.iq && m.iq.length ? `<button class="mini" data-iq="${m.seq}">IQ</button>` : '';
+      return `<div class="row ${m.unknown ? 'unknown' : ''}" data-seq="${m.seq}"><div class="top"><span class="num">#${m.seq}</span><time>${hhmmss(m.time)}</time><span class="m">${devName(m.key) ? escapeHtml(devName(m.key)) + ' · ' : ''}${escapeHtml(m.model)}</span>${tags}<span class="f">${mhz(m.freqHz)}</span><span style="margin-left:auto;color:var(--dim)">${m.snr.toFixed(0)} dB</span>${iq}</div><div class="d">${d}</div></div>`;
+    }).join('');
+  }
+  function downloadIQ(seq, label) {
+    const m = log.find(x => x.seq === seq && x.iq); if (!m) return;
+    label = label || devName(m.key);
+    const name = (label ? label.replace(/[^\w.-]+/g, '_') + '_' : '') + `g${String(m.seq).padStart(3, '0')}_${(m.centerHz / 1e6).toFixed(3)}M_${m.sr / 1000}k` +
+      (m.pktStartMs !== undefined ? `_pkt${m.pktStartMs}-${m.pktEndMs}ms_off${Math.round(m.freqOffHz / 1000)}k` : '') + '.cu8';
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([m.iq], { type: 'application/octet-stream' }));
+    a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+  $('log').addEventListener('click', e => {
+    if (e.target.closest('a')) return;
+    const b = e.target.closest('[data-iq]');
+    if (b) { downloadIQ(+b.dataset.iq); return; }
+    const r = e.target.closest('[data-seq]');
+    if (r) openPacket(+r.dataset.seq);
+  });
+  $('devices').addEventListener('click', e => {
+    if (e.target.closest('a') || e.target.closest('.cmpChk')) return;
+    const c = e.target.closest('[data-key]'); if (!c) return;
+    const cb = e.target.closest('[data-card]');
+    if (cb) {
+      if (cb.dataset.card === 'ai') aiOpen({ keys: [c.dataset.key] });
+      else if (cb.dataset.card === 'hide') setHidden([c.dataset.key], !hidden.has(c.dataset.key));
+      else if (cb.dataset.card === 'name') renameDevice(c.dataset.key);
+      else { const m = latestIq(c.dataset.key); if (m) downloadIQ(m.seq, devName(c.dataset.key)); }
+      return;
+    }
+    const d = devices.get(c.dataset.key); if (d && d.lastSeq) openPacket(d.lastSeq);
+  });
+
+  // ---- history storage (IndexedDB) with time and size limits
+  const Store = {
+    db: null, ok: false, queue: [], bytes: 0, count: 0, oldest: 0,
+    open() {
+      return new Promise(res => {
+        try {
+          const r = indexedDB.open('l433-history', 1);
+          r.onupgradeneeded = () => r.result.createObjectStore('log', { keyPath: 'dbk', autoIncrement: true }).createIndex('time', 'time');
+          r.onsuccess = () => { this.db = r.result; this.ok = true; res(true); };
+          r.onerror = () => res(false);
+        } catch { res(false); }
+      });
+    },
+    add(entry) {
+      if (!this.ok || entry.sim || !$('persist').checked) return;
+      const { iq, ...rec } = entry;
+      if (rec.w && rec.w.length > 400) { rec.w = rec.w.slice(0, 400); rec.g = rec.g.slice(0, 400); }
+      rec.bytes = JSON.stringify(rec).length + 200;
+      this.queue.push(rec);
+    },
+    flush() {
+      if (!this.ok || !this.queue.length) return;
+      const q = this.queue; this.queue = [];
+      try {
+        const st = this.db.transaction('log', 'readwrite').objectStore('log');
+        for (const r of q) { st.add(r); this.bytes += r.bytes; this.count++; if (!this.oldest) this.oldest = r.time; }
+      } catch (e) { console.warn('history write failed', e); }
+    },
+    loadAll() {
+      return new Promise(res => {
+        if (!this.ok) return res([]);
+        const r = this.db.transaction('log').objectStore('log').getAll();
+        r.onsuccess = () => res(r.result || []); r.onerror = () => res([]);
+      });
+    },
+    // delete records older than cutoff, then the oldest ones until under maxBytes
+    prune(cutoff, maxBytes) {
+      if (!this.ok) return Promise.resolve();
+      return new Promise(res => {
+        const tx = this.db.transaction('log', 'readwrite'), st = tx.objectStore('log');
+        const cur = st.openCursor();
+        cur.onsuccess = () => {
+          const c = cur.result;
+          if (!c) return;
+          const r = c.value;
+          if (r.time < cutoff || this.bytes > maxBytes * 0.9) { this.bytes -= r.bytes || 0; this.count--; c.delete(); c.continue(); }
+          else this.oldest = r.time;
+        };
+        tx.oncomplete = () => { if (this.count <= 0) { this.count = 0; this.bytes = 0; this.oldest = 0; } res(); };
+        tx.onerror = () => res();
+      });
+    },
+    clear() {
+      if (!this.ok) return;
+      this.db.transaction('log', 'readwrite').objectStore('log').clear();
+      this.bytes = 0; this.count = 0; this.oldest = 0; this.queue = [];
+    },
+  };
+  const keepMs = () => (+$('keepH').value || 24) * 3600e3;
+  const maxBytes = () => (+$('maxMB').value || 100) * 1e6;
+  async function prune() {
+    const cutoff = Date.now() - keepMs();
+    while (log.length && log[log.length - 1].time < cutoff) { const old = log.pop(); if (old.iq) iqBytes -= old.iq.length; }
+    for (const [k, d] of devices) {
+      d.times = d.times.filter(t => t >= cutoff);
+      if (!d.times.length && k !== filterKey) devices.delete(k);
+    }
+    Store.flush();
+    await Store.prune(cutoff, maxBytes());
+    histInfo();
+  }
+  function histInfo() {
+    const parts = [];
+    if (!Store.ok) parts.push('This browser blocked local storage, so history only lives until the page closes.');
+    else if (!$('persist').checked) parts.push('Not saving between sessions.');
+    else parts.push(`${Store.count.toLocaleString()} packets on disk (${(Store.bytes / 1e6).toFixed(1)} of ${$('maxMB').value} MB)` +
+      (Store.oldest ? ` · oldest ${ago(Store.oldest)}` : ''));
+    parts.push(`${log.length.toLocaleString()} in this view · raw IQ in memory ${(iqBytes / 1e6).toFixed(1)} of ${IQ_BUDGET / 1e6} MB`);
+    $('histInfo').textContent = parts.join(' · ');
+  }
+  async function restoreHistory() {
+    if (!(await Store.open())) { histInfo(); return; }
+    const cutoff = Date.now() - keepMs();
+    const recs = (await Store.loadAll()).filter(r => r.time >= cutoff).sort((a, b) => a.time - b.time);
+    Store.count = recs.length; Store.bytes = recs.reduce((s, r) => s + (r.bytes || 0), 0); Store.oldest = recs.length ? recs[0].time : 0;
+    const q = qualifiedKeys(recs);
+    for (const r of recs) {
+      log.unshift(r);
+      if (r.unknown) unknownToDevice(r, true, q); else addDevice(r, true);
+      if (r.seq > pktSeq) pktSeq = r.seq;
+    }
+    if (log.length > LOG_MEM) log.length = LOG_MEM;
+    if (recs.length) setStatus(`Restored ${recs.length.toLocaleString()} packets from earlier sessions (last ${$('keepH').selectedOptions[0].text}). ` + $('status').innerHTML);
+    for (const d of devices.values()) d.inFilter = true;
+    refreshFilterList(); renderLog(); renderDevices();
+    await prune();
+  }
+  setInterval(() => Store.flush(), 2000);
+  setInterval(prune, 60000);
+
+  // ---- device filter
+  function refreshFilterList() {
+    const sel = $('devFilter'), cur = filterKey;
+    const list = [...devices.values()].sort((a, b) => a.model.localeCompare(b.model) || String(a.id).localeCompare(String(b.id)));
+    sel.innerHTML = '<option value="">all devices</option>' + list.map(d =>
+      `<option value="${escapeHtml(d.key)}">${devName(d.key) ? escapeHtml(devName(d.key)) + ' — ' : ''}${escapeHtml(d.model)} · ${escapeHtml(fmtId(d))}${d.channel !== undefined ? ' ch ' + d.channel : ''}${d.sim ? ' (sim)' : ''}</option>`).join('');
+    sel.value = list.some(d => d.key === cur) ? cur : '';
+  }
+  function setFilter(key) {
+    filterKey = key || '';
+    $('devFilter').value = filterKey;
+    renderLog(); renderDevices();
+  }
+  $('devFilter').onchange = () => setFilter($('devFilter').value);
+
+  // ---- pause
+  function setPaused(v) {
+    paused = v;
+    $('pause').textContent = v ? 'Resume' : 'Pause';
+    $('pause').classList.toggle('pausedBtn', v);
+    $('dot').classList.toggle('on', (running || simActive) && !v);
+  }
+  function togglePause() {
+    if (!running && !simActive) return;
+    setPaused(!paused);
+    if (simActive) {
+      if (paused) { clearInterval(simTimer); simTimer = null; }
+      else simTimer = setInterval(simTick, 1200);
+    }
+    if (paused) {
+      setStatus('Paused. Detection is stopped' + (running ? ' and the dongle stays connected' : '') + '. Click any packet to inspect it, then press <b>Resume</b> (or the space bar).');
+    } else {
+      worker.postMessage({ cmd: 'config', cfg: cfgNow() }); // fresh detector state; waterfall is kept
+      setStatus(running ? listening() : 'Simulation resumed.');
+    }
+  }
+  $('pause').onclick = togglePause;
+  // Space = pause/resume everywhere except while typing (and never "clicks" a focused button)
+  const typing = () => /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName) && document.activeElement.type !== 'checkbox' && document.activeElement.type !== 'range';
+  addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !$('modal').hidden) { closeModal(); return; }
+    if (e.code === 'Space' && !typing()) { e.preventDefault(); if (!e.repeat) togglePause(); }
+  }, true);
+  addEventListener('keyup', e => { if (e.code === 'Space' && !typing()) e.preventDefault(); }, true);
+
+  // ---- packet detail view
+  function closeModal() { $('modal').hidden = true; }
+  $('modal').addEventListener('click', e => { if (e.target === $('modal')) closeModal(); });
+  const hexBits = (hex, len) => [...hex].map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('').slice(0, len);
+  async function copy(text, btn) {
+    try { await navigator.clipboard.writeText(text); const t = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => (btn.textContent = t), 1200); }
+    catch { btn.textContent = 'Copy blocked'; }
+  }
+  function openPacket(seq) {
+    const entries = log.filter(x => x.seq === seq);
+    if (!entries.length) return;
+    const m = entries[0], a = m.analysis;
+    const decoded = entries.filter(e => !e.unknown);
+    const title = decoded.length ? decoded.map(e => e.model).join(' + ') : m.model;
+    let h = `<div class="mhead"><h3>#${seq} · ${m.key && devName(m.key) ? escapeHtml(devName(m.key)) + ' · ' : ''}${escapeHtml(title)}</h3>` +
+      (m.sim ? '<span class="tag sim">sim</span>' : '') + (m.fskDevHz ? `<span class="tag fsk">FSK ±${Math.round(m.fskDevHz / 1000)} kHz</span>` : '') +
+      `<button class="x" data-act="close">Close</button></div>`;
+    h += `<div class="meta"><span>${new Date(m.time).toLocaleString()}</span><span><b>${mhz(m.freqHz)}</b></span><span>SNR <b>${m.snr.toFixed(1)} dB</b></span><span>level <b>${m.rssi.toFixed(1)} dBFS</b></span><span><b>${m.n}</b> pulses</span></div>`;
+    for (const e of decoded) {
+      h += `<h4>Decoded · ${escapeHtml(e.model)}</h4><table><tr><td>ID</td><td>${escapeHtml(fmtId(e).replace(/^ID /, ''))}</td></tr>` +
+        (e.channel !== undefined ? `<tr><td>channel</td><td>${e.channel}</td></tr>` : '') +
+        Object.entries(e.data).map(([k, v]) => `<tr><td>${escapeHtml(LABELS[k] || k.replace('_', ' '))}</td><td>${escapeHtml(v)}</td></tr>`).join('') + '</table>';
+    }
+    h += `<h4>Pulse train (scroll sideways)</h4><div class="trainWrap"><canvas id="mtrain" height="120"></canvas></div><div id="mtinfo" class="bin" style="margin-top:4px"></div>`;
+    if (a) {
+      h += `<h4>Bits · ${escapeHtml(a.modulation)}</h4><div class="bin" style="color:var(--text)">${escapeHtml(a.info)} · ${a.rows} row(s) · timing regularity ${Math.round(a.score * 100)}%</div>`;
+      if (a.rowsHex.length) {
+        h += '<table class="rowsTbl">' + a.rowsHex.map((r, i) =>
+          `<tr><td>${r.kind}{${r.len}}</td><td>${r.hex}<div class="bin">${hexBits(r.hex, r.len)}</div></td><td><button class="mini" data-copy="${r.hex}">Copy</button></td></tr>`).join('') + '</table>';
+      }
+    }
+    if (a && a.candidates) {
+      const th = minMatch();
+      h += `<h4>Possible devices (rtl_433 database, threshold ${Math.round(th * 100)}%)</h4>`;
+      h += a.candidates.length
+        ? '<div class="cands">' + a.candidates.map(x => `<div class="${x.score < th ? 'dim' : ''}">${candLine(x)}</div>`).join('') + '</div>'
+        : '<div class="cands"><span class="none">No timing match in the database.</span></div>';
+    }
+    h += `<h4>Raw timings <span style="text-transform:none">(µs, pulse then gap)</span></h4><textarea readonly>${m.w.map((w, i) => `${w} ${m.g[i]}`).join('\n')}${m.n > m.w.length ? '\n…' : ''}</textarea>`;
+    h += '<div class="actions">' +
+      (m.iq && m.iq.length ? '<button data-act="iq">Download IQ (.cu8)</button>' : '') +
+      (a && a.rowsHex.length ? `<button data-copy="${a.rowsHex.map(r => `{${r.len}}${r.hex}`).join(' ')}">Copy all rows</button>` : '') +
+      (m.key ? `<button data-act="name">${devName(m.key) ? 'Rename device' : 'Name this device'}</button>` : '') +
+      `<button data-act="ai" title="Make a prompt with this packet's data to paste into an AI chat">Prompt for AI</button>` +
+      (m.key && devices.has(m.key) ? `<button data-act="hide">${hidden.has(m.key) ? 'Unhide device' : 'Hide device'}</button>` : '') +
+      (m.key && devices.has(m.key) ? `<button data-act="cmp">${cmpSel.has(m.key) ? 'Remove from comparison' : 'Add device to comparison'}</button>` : '') +
+      `<button data-act="filter">${filterKey === m.key ? 'Show all devices' : 'Show only this device'}</button>` +
+      '<button data-act="close">Close</button></div>';
+    const panel = $('mpanel');
+    panel.innerHTML = h;
+    panel.onclick = e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.copy) copy(b.dataset.copy, b);
+      else if (b.dataset.act === 'close') closeModal();
+      else if (b.dataset.act === 'iq') downloadIQ(seq);
+      else if (b.dataset.act === 'name') { renameDevice(m.key); openPacket(seq); }
+      else if (b.dataset.act === 'ai') aiOpen({ keys: m.key && devices.has(m.key) ? [m.key] : [], seq });
+      else if (b.dataset.act === 'hide') { const on = !hidden.has(m.key); setHidden([m.key], on); if (on && !showHidden) closeModal(); else openPacket(seq); }
+      else if (b.dataset.act === 'cmp') { toggleCmp(m.key, !cmpSel.has(m.key)); renderDevices(); openPacket(seq); }
+      else if (b.dataset.act === 'filter') { setFilter(filterKey === m.key ? '' : m.key); closeModal(); }
+    };
+    $('modal').hidden = false;
+    drawDetailTrain(m);
+  }
+  function drawDetailTrain(m) {
+    const c = $('mtrain'), H = 120;
+    let total = 0; for (let i = 0; i < m.w.length; i++) total += m.w[i] + (i < m.w.length - 1 ? m.g[i] : 0);
+    const minW = Math.max(10, Math.min(...m.w, ...m.g.slice(0, -1).filter(x => x > 0)));
+    const avail = c.parentElement.clientWidth - 20;
+    const scale = Math.max(avail / Math.max(total, 1), 3 / minW); // px per µs: narrowest feature ≥ 3 px
+    const W = Math.min(30000, Math.ceil(total * scale) + 20);
+    c.width = W; c.height = H; c.style.width = W + 'px'; c.style.height = H + 'px';
+    const ctx = c.getContext('2d'), sx = (W - 20) / Math.max(total, 1), hi = 18, lo = H - 30;
+    // time grid
+    let step = 1; const want = 90 / sx; const pow = Math.pow(10, Math.floor(Math.log10(want)));
+    for (const k of [1, 2, 5, 10]) if (k * pow >= want) { step = k * pow; break; }
+    ctx.font = '10px system-ui'; ctx.fillStyle = '#8b98a8'; ctx.strokeStyle = '#2a3340';
+    for (let t = 0; t <= total; t += step) {
+      const x = 10 + t * sx; ctx.beginPath(); ctx.moveTo(x, 8); ctx.lineTo(x, lo + 6); ctx.stroke();
+      ctx.fillText(t >= 1000 ? (t / 1000).toFixed(step >= 1000 ? 0 : step >= 100 ? 1 : 2) + ' ms' : Math.round(t) + ' µs', x + 2, H - 8);
+    }
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.moveTo(10, lo);
+    let t = 0;
+    for (let i = 0; i < m.w.length; i++) {
+      const x0 = 10 + t * sx, x1 = 10 + (t + m.w[i]) * sx;
+      ctx.lineTo(x0, lo); ctx.lineTo(x0, hi); ctx.lineTo(x1, hi); ctx.lineTo(x1, lo);
+      t += m.w[i] + (i < m.w.length - 1 ? m.g[i] : 0);
+    }
+    ctx.lineTo(W - 10, lo); ctx.stroke();
+    const ws = [...m.w].sort((a, b) => a - b), gs = m.g.slice(0, -1).sort((a, b) => a - b);
+    $('mtinfo').textContent = `${(total / 1000).toFixed(2)} ms · pulses ${ws[0]}–${ws[ws.length - 1]} µs · gaps ${gs[0] ?? '-'}–${gs[gs.length - 1] ?? '-'} µs` + (W >= 30000 ? ' · (long packet: drawing compressed)' : '');
+  }
+
+  function fitCanvas(c) {
+    const r = devicePixelRatio || 1, w = c.clientWidth, h = +c.getAttribute('height');
+    if (c.width !== Math.round(w * r)) { c.width = Math.round(w * r); c.height = Math.round(h * r); }
+    const ctx = c.getContext('2d'); ctx.setTransform(r, 0, 0, r, 0, 0); return [ctx, w, h];
+  }
+  function drawTrain(p, seq) {
+    const [ctx, w, h] = fitCanvas($('train'));
+    ctx.clearRect(0, 0, w, h);
+    let total = 0; const segs = [];
+    for (let i = 0; i < p.w.length; i++) {
+      segs.push([total, p.w[i]]); total += p.w[i] + (i < p.w.length - 1 ? p.g[i] : 0);
+      if (total > 200000) break;
+    }
+    const sx = (w - 10) / Math.max(total, 1), hi = 20, lo = h - 18;
+    ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(5, lo);
+    for (const [t, d] of segs) { const x0 = 5 + t * sx, x1 = 5 + (t + d) * sx; ctx.lineTo(x0, lo); ctx.lineTo(x0, hi); ctx.lineTo(x1, hi); ctx.lineTo(x1, lo); }
+    ctx.lineTo(w - 5, lo); ctx.stroke();
+    ctx.fillStyle = '#8b98a8'; ctx.font = '11px system-ui';
+    ctx.fillText('0 ms', 5, h - 4); const lbl = (total / 1000).toFixed(1) + ' ms'; ctx.fillText(lbl, w - 5 - ctx.measureText(lbl).width, h - 4);
+    const ws = [...p.w].sort((a, b) => a - b), gs = [...p.g.slice(0, -1)].sort((a, b) => a - b);
+    $('trainInfo').textContent = `#${seq} · ${mhz(p.freqHz)} · ${p.n} pulses · pulse ${ws[0]}–${ws[ws.length - 1]} µs · gap ${gs[0] ?? '-'}–${gs[gs.length - 1] ?? '-'} µs · ${p.snr.toFixed(1)} dB SNR`;
+  }
+
+  // ---- waterfall
+  const wf = $('wf'), wctx = wf.getContext('2d');
+  const W = wf.width, H = wf.height;
+  const LUT = (() => {
+    const stops = [[0, 0, 0, 20], [0.25, 10, 30, 140], [0.5, 30, 120, 230], [0.7, 60, 220, 220], [0.85, 250, 230, 80], [1, 255, 255, 255]];
+    const out = new Uint8ClampedArray(256 * 3);
+    for (let i = 0; i < 256; i++) {
+      const x = i / 255; let k = 0; while (k < stops.length - 2 && x > stops[k + 1][0]) k++;
+      const [x0, r0, g0, b0] = stops[k], [x1, r1, g1, b1] = stops[k + 1], f = (x - x0) / (x1 - x0);
+      out[i * 3] = r0 + (r1 - r0) * f; out[i * 3 + 1] = g0 + (g1 - g0) * f; out[i * 3 + 2] = b0 + (b1 - b0) * f;
+    }
+    return out;
+  })();
+  let wfCfg = null, wfFloor = null;
+  function wfReset(c) {
+    wfCfg = { centerHz: c.centerHz, sr: c.sr, listenHz: c.listenHz };
+    wctx.fillStyle = '#000'; wctx.fillRect(0, 0, W, H);
+    wfFloor = null;
+    const ax = $('axis'); let html = '';
+    const lo = c.centerHz - c.sr / 2, step = c.sr > 500000 ? 100000 : 50000;
+    for (let f = Math.ceil(lo / step) * step; f < lo + c.sr; f += step) {
+      const x = (f - lo) / c.sr * 100;
+      if (x < 4 || x > 96) continue;
+      html += `<i style="left:${x}%"></i><span style="left:${x}%">${(f / 1e6).toFixed(c.sr > 500000 ? 1 : 2)}</span>`;
+    }
+    html += `<div class="listen" style="left:${(c.listenHz - lo) / c.sr * 100}%" title="listening frequency"></div>`;
+    ax.innerHTML = html;
+  }
+  function wfRow(m) {
+    if (!wfCfg || m.centerHz !== wfCfg.centerHz || m.sr !== wfCfg.sr) return;
+    const row = m.row;
+    const sorted = Float32Array.from(row).sort();
+    const fl = sorted[Math.floor(sorted.length * 0.3)];
+    wfFloor = wfFloor === null ? fl : wfFloor * 0.9 + fl * 0.1;
+    const lo = wfFloor - 3, span = 30;
+    wctx.drawImage(wf, 0, 0, W, H - 1, 0, 1, W, H - 1);
+    const img = wctx.createImageData(W, 1);
+    for (let x = 0; x < W; x++) {
+      const v = row[Math.floor(x * row.length / W)];
+      const i = Math.max(0, Math.min(255, Math.round((v - lo) / span * 255))) * 3;
+      img.data[x * 4] = LUT[i]; img.data[x * 4 + 1] = LUT[i + 1]; img.data[x * 4 + 2] = LUT[i + 2]; img.data[x * 4 + 3] = 255;
+    }
+    wctx.putImageData(img, 0, 0);
+  }
+  function wfMark(p, seq, color) {
+    if (!$('showMarks').checked || !wfCfg || p.centerHz !== wfCfg.centerHz) return;
+    const x = ((p.freqHz - wfCfg.centerHz) / wfCfg.sr + 0.5) * W;
+    wctx.fillStyle = color; wctx.fillRect(x - 5, 0, 10, 3);
+    wctx.font = 'bold 12px system-ui'; wctx.fillText('#' + seq, x + 7, 12);
+  }
+  wf.addEventListener('mousemove', e => {
+    if (!wfCfg) return;
+    const r = wf.getBoundingClientRect();
+    const f = wfCfg.centerHz + ((e.clientX - r.left) / r.width - 0.5) * wfCfg.sr;
+    $('wfCursor').hidden = false; $('wfCursor').textContent = mhz(f);
+  });
+  wf.addEventListener('mouseleave', () => { $('wfCursor').hidden = true; });
+
+  // ---- simulation
+  const simTick = () => worker.postMessage({ cmd: 'sim' });
+  function stopSim() {
+    if (!simActive) return;
+    simActive = false; clearInterval(simTimer); simTimer = null;
+    $('sim').textContent = 'Simulate';
+    if (!running) { setPaused(false); $('pause').disabled = true; $('dot').classList.remove('on'); }
+  }
+  function simulate() {
+    if (simActive) return stopSim();
+    if (running) { setStatus('Disconnect the dongle first to run the simulation.'); return; }
+    sendConfig();
+    simActive = true; setPaused(false); $('pause').disabled = false;
+    simTick();
+    simTimer = setInterval(simTick, 1200);
+    $('sim').textContent = 'Stop simulation';
+    setStatus(`Simulating weak sensors around ${(cfgNow().listenHz / 1e6).toFixed(3)} MHz (in sensitive mode they're at or below the level rtl_433 needs). Marked <span class="tag sim">sim</span>.`);
+  }
+
+  // ---- events
+  $('connect').onclick = () => (running ? disconnect() : connect());
+  $('sim').onclick = simulate;
+  for (const id of ['freq', 'gain', 'ppm', 'mode']) $(id).addEventListener('change', () => {
+    store.set(id, $(id).value);
+    if (id === 'mode') { $('snr').value = trigFor($('mode').value); $('snrv').textContent = $('snr').value + ' dB'; }
+    if (running) pendingTune = true; else sendConfig();
+  });
+  $('snr').oninput = () => {
+    $('snrv').textContent = $('snr').value + ' dB';
+    store.set('snr.' + $('mode').value, +$('snr').value);
+    worker.postMessage({ cmd: 'snr', snrDb: +$('snr').value });
+  };
+  $('showUnk').onchange = renderLog;
+  $('keepH').value = store.get('keepH', 24); $('maxMB').value = store.get('maxMB', 100); $('persist').checked = store.get('persist', true);
+  $('devSort').value = store.get('devSort', 'last');
+  $('grpFrom').value = store.get('grpFrom', 1); $('grpTo').value = store.get('grpTo', '');
+  $('minSeen').value = store.get('minSeen', 2);
+  $('minSeen').onchange = () => { store.set('minSeen', $('minSeen').value); rebuildDevices(); };
+  for (const id of ['grpFrom', 'grpTo']) $(id).onchange = () => { store.set(id, $(id).value); rebuildDevices(); };
+  $('keepH').onchange = () => { store.set('keepH', +$('keepH').value); prune(); };
+  $('maxMB').onchange = () => { store.set('maxMB', +$('maxMB').value); prune(); };
+  $('persist').onchange = () => { store.set('persist', $('persist').checked); histInfo(); };
+  $('devSort').onchange = () => { store.set('devSort', $('devSort').value); renderDevices(); };
+  $('clearHist').onclick = () => {
+    if ($('clearHist').dataset.armed) {
+      Store.clear(); log.length = 0; iqBytes = 0; devices.clear(); setFilter(''); refreshFilterList(); renderLog(); renderDevices(); histInfo();
+      delete $('clearHist').dataset.armed; $('clearHist').textContent = 'Clear history';
+    } else {
+      $('clearHist').dataset.armed = '1'; $('clearHist').textContent = 'Click again to delete everything';
+      setTimeout(() => { delete $('clearHist').dataset.armed; $('clearHist').textContent = 'Clear history'; }, 4000);
+    }
+  };
+  $('minMatch').onchange = () => { store.set('minMatch', +$('minMatch').value); renderLog(); renderDevices(); };
+  $('clearLog').onclick = () => { log.length = 0; iqBytes = 0; renderLog(); histInfo(); };
+  $('showHid').onchange = e => { showHidden = e.target.checked; updHidCount(); renderDevices(); renderLog(); };
+  $('clearDev').onclick = () => { devices.clear(); setFilter(''); refreshFilterList(); renderDevices(); };
+  $('export').onclick = () => {
+    const rows = log.map(({ iq, ...m }) => ({ ...m, time: new Date(m.time).toISOString() }));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' }));
+    a.download = '433-log.json'; a.click();
+  };
+  setInterval(() => { if (devices.size) renderDevices(); }, 2000);
+  if (worker) sendConfig();
+  restoreHistory();
+  setInterval(histInfo, 5000);
+})();
+</script>
+</body>
+</html>
